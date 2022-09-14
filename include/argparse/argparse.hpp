@@ -33,7 +33,6 @@ SOFTWARE.
 #include <any>
 #include <array>
 #include <cerrno>
-#include <charconv>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -52,6 +51,10 @@ SOFTWARE.
 #include <utility>
 #include <variant>
 #include <vector>
+
+#ifndef ARGPARSE_NO_SCAN
+#include <charconv>
+#endif
 
 namespace argparse {
 
@@ -196,6 +199,8 @@ constexpr auto consume_hex_prefix(std::string_view s)
   return {false, s};
 }
 
+#ifndef ARGPARSE_NO_SCAN
+
 template <class T, auto Param>
 inline auto do_from_chars(std::string_view s) -> T {
   T x;
@@ -243,6 +248,7 @@ template <class T> struct parse_number<T> {
     return do_from_chars<T, radix_10>(rest);
   }
 };
+#endif
 
 namespace {
 
@@ -274,6 +280,8 @@ template <class T> inline auto do_strtod(std::string const &s) -> T {
   }
   return x; // unreachable
 }
+
+#ifndef ARGPARSE_NO_SCAN
 
 template <class T> struct parse_number<T, chars_format::general> {
   auto operator()(std::string const &s) -> T {
@@ -325,6 +333,30 @@ template <class T> struct parse_number<T, chars_format::fixed> {
     return do_strtod<T>(s);
   }
 };
+#endif // #ifndef ARGPARSE_NO_SCAN
+
+template <typename StrIt>
+std::string join(StrIt first, StrIt last, const std::string &separator) {
+  if (first == last) {
+    return "";
+  }
+  std::stringstream value;
+  value << *first;
+  ++first;
+  while (first != last) {
+    value << separator << *first;
+    ++first;
+  }
+  return value.str();
+}
+
+inline std::size_t get_screen_width() {
+  char *c = std::getenv("COLUMNS");
+  if (c == nullptr) {
+    return 80;
+  }
+  return std::stoi(c);
+}
 
 } // namespace details
 
@@ -349,9 +381,12 @@ inline default_arguments operator&(const default_arguments &a,
 }
 
 class ArgumentParser;
+class ArgumentParserMutuallyExclusiveGroup;
 
 class Argument {
   friend class ArgumentParser;
+  friend class ArgumentParserMutuallyExclusiveGroup;
+
   friend auto operator<<(std::ostream &stream, const ArgumentParser &parser)
       -> std::ostream &;
 
@@ -359,7 +394,7 @@ class Argument {
   explicit Argument(std::array<std::string_view, N> &&a,
                     std::index_sequence<I...> /*unused*/)
       : m_is_optional((is_optional(a[I]) || ...)), m_is_required(false),
-        m_is_repeatable(false), m_is_used(false) {
+        m_is_repeatable(false), m_is_used(false), m_in_group(false) {
     ((void)m_names.emplace_back(a[I]), ...);
     std::sort(
         m_names.begin(), m_names.end(), [](const auto &lhs, const auto &rhs) {
@@ -374,6 +409,11 @@ public:
 
   Argument &help(std::string help_text) {
     m_help = std::move(help_text);
+    return *this;
+  }
+
+  Argument &metavar(std::string metavar) {
+    m_metavar = std::move(metavar);
     return *this;
   }
 
@@ -419,6 +459,8 @@ public:
     return *this;
   }
 
+#ifndef ARGPARSE_NO_SCAN
+
   template <char Shape, typename T>
   auto scan() -> std::enable_if_t<std::is_arithmetic_v<T>, Argument &> {
     static_assert(!(std::is_const_v<T> || std::is_volatile_v<T>),
@@ -458,6 +500,7 @@ public:
 
     return *this;
   }
+#endif // #ifndef ARGPARSE_NO_SCAN
 
   Argument &nargs(std::size_t num_args) {
     m_num_args_range = NArgsRange{num_args, num_args};
@@ -558,36 +601,130 @@ public:
         throw_required_arg_no_value_provided_error();
       }
     } else {
-      if (!m_num_args_range.contains(m_values.size()) && !m_default_value.has_value()) {
+      if (!m_in_group && !m_num_args_range.contains(m_values.size()) && !m_default_value.has_value()) {
         throw_nargs_range_validation_error();
       }
     }
   }
 
+  std::string get_inline_usage() const {
+    std::stringstream usage;
+    if (!m_is_required && !m_in_group) {
+      usage << "[";
+    }
+    if (!m_is_optional) {
+      if (!m_metavar.empty()) {
+        usage << " " << m_metavar;
+      } else {
+        usage << " " << m_names[0];
+      }
+    } else {
+      // Use the longest variant. Thankfully, these are pre-sorted
+      usage << m_names.back();
+      const std::string metavar = m_metavar.size() > 0 ? m_metavar : "VAR";
+      if (m_num_args_range.get_max() > 0) {
+        usage << " " << metavar;
+        if (m_num_args_range.get_max() > 1) {
+          usage << "...";
+        }
+      }
+    }
+    if (!m_is_required && !m_in_group) {
+      usage << "]";
+    }
+    return usage.str();
+  }
+
   std::size_t get_arguments_length() const {
-    return std::accumulate(std::begin(m_names), std::end(m_names),
-                           std::size_t(0), [](const auto &sum, const auto &s) {
-                             return sum + s.size() +
-                                    1; // +1 for space between names
-                           });
+    std::size_t names_size = std::accumulate(
+        std::begin(m_names), std::end(m_names), std::size_t(0),
+        [](const auto &sum, const auto &s) { return sum + s.size(); });
+    if (is_positional(m_names.front())) {
+      // A set metavar means this replaces the names
+      if (!m_metavar.empty()) {
+        // Indent and metavar
+        return 2 + m_metavar.size();
+      } else {
+        // Indent and space-separated
+        return 2 + names_size + (m_names.size() - 1);
+      }
+    }
+    // Is an option - include both names _and_ metavar
+    // size = text + (", " between names)
+    std::size_t size = names_size + 2 * (m_names.size() - 1);
+    if (m_metavar.size() > 0 && m_num_args_range == NArgsRange{1, 1}) {
+      size += m_metavar.size() + 1;
+    }
+    return size + 2; // indent
   }
 
   friend std::ostream &operator<<(std::ostream &stream,
                                   const Argument &argument) {
+    // Geometry for managing wrapping
+    std::size_t screen_width = details::get_screen_width();
+    // The stream is already set to the maximum argument name values width
+    // 3 = indent between names and help (including token starter)
+    std::size_t help_indent = stream.width() + 3;
+    std::size_t width = help_indent;
+    // std::cout << "Screen: " << screen_width << ", stream: " << stream.width() << std::endl;
+
     std::stringstream name_stream;
-    std::copy(std::begin(argument.m_names), std::end(argument.m_names),
-              std::ostream_iterator<std::string>(name_stream, " "));
-    stream << name_stream.str() << "\t" << argument.m_help;
-    if (argument.m_default_value.has_value()) {
-      if (!argument.m_help.empty()) {
-        stream << " ";
+    name_stream << "  "; // indent
+    if (argument.is_positional(argument.m_names.front())) {
+      if (!argument.m_metavar.empty()) {
+        name_stream << argument.m_metavar;
+      } else {
+        name_stream << details::join(argument.m_names.begin(),
+                                     argument.m_names.end(), " ");
       }
-      stream << "[default: " << argument.m_default_value_repr << "]";
+    } else {
+      name_stream << details::join(argument.m_names.begin(),
+                                   argument.m_names.end(), ", ");
+      // If we have a metavar, and one narg - print the metavar
+      if (argument.m_metavar.size() > 0 &&
+          argument.m_num_args_range == NArgsRange{1, 1}) {
+        name_stream << " " << argument.m_metavar;
+      }
+    }
+    stream << name_stream.str() << "   ";
+
+    // Now, we can stream the help message. Let's wrap this over the screen width
+    std::istringstream help(argument.m_help);
+    std::string token;
+    while (std::getline(help, token, ' ')) {
+      if (token.size() + width + 1 > screen_width) {
+        stream << "\n" << std::string(help_indent, ' ' );
+        width = help_indent;
+      }
+      stream << " " << token;
+      width += token.size() + 1;
+    }
+
+    // stream << argument.m_help;
+
+    if (argument.m_default_value.has_value() &&
+        argument.m_num_args_range != NArgsRange{0, 0}) {
+      std::string default_msg;
+      if (!argument.m_help.empty()) {
+        default_msg = " ";
+      }
+      default_msg += "[default: " + argument.m_default_value_repr + "]";
+      if (default_msg.size() + width > screen_width) {
+        stream << "\n" << std::string(help_indent, ' ' );
+        width = help_indent;
+      }
+      stream << default_msg;
     } else if (argument.m_is_required) {
+      std::string required_msg;
       if (!argument.m_help.empty()) {
-        stream << " ";
+        required_msg = " ";
       }
-      stream << "[required]";
+      required_msg += "[required]";
+      if (required_msg.size() + width > screen_width) {
+        stream << "\n" << std::string(help_indent, ' ');
+        width = help_indent;
+      }
+      stream << required_msg;
     }
     stream << "\n";
     return stream;
@@ -646,6 +783,12 @@ private:
     std::size_t get_max() const {
       return m_max;
     }
+
+    bool operator==(const NArgsRange &rhs) const {
+      return rhs.m_min == m_min && rhs.m_max == m_max;
+    }
+
+    bool operator!=(const NArgsRange &rhs) const { return !(*this == rhs); }
   };
 
   void throw_nargs_range_validation_error() const {
@@ -907,6 +1050,7 @@ private:
   std::vector<std::string> m_names;
   std::string_view m_used_name;
   std::string m_help;
+  std::string m_metavar;
   std::any m_default_value;
   std::string m_default_value_repr;
   std::any m_implicit_value;
@@ -922,7 +1066,63 @@ private:
   bool m_is_required : true;
   bool m_is_repeatable : true;
   bool m_is_used : true; // True if the optional argument is used by user
+  bool m_in_group : true; // Controls e.g. visibility in usage vs group
 };
+
+class ArgumentParserMutuallyExclusiveGroup {
+  friend class ArgumentParser;
+  friend auto operator<<(std::ostream &stream, const ArgumentParser &parser)
+      -> std::ostream &;
+
+    ArgumentParserMutuallyExclusiveGroup(ArgumentParserMutuallyExclusiveGroup&) = delete;
+public:
+    ArgumentParserMutuallyExclusiveGroup(ArgumentParser &parser, bool required) : m_parser(parser), m_required(required) {}
+
+  std::string get_inline_usage() const {
+    std::stringstream usage;
+    usage << (m_required ? "( " : "[ ");
+
+    // Make an internal list of all the options, then join in
+    std::vector<std::string> options;
+
+    for (const Argument &arg : m_arguments)  {
+      options.push_back((arg).get_inline_usage());
+    }
+    usage << details::join(options.begin(), options.end(), " | ");
+    usage << (m_required ? " )" : " ]");
+
+    return usage.str();
+  }
+
+  auto validate() const -> bool {
+    // Validate that
+    // - if required, we have one argument
+    // - we don't have more than one argument
+    std::optional<std::reference_wrapper<Argument>> used;
+    for (Argument &arg : m_arguments) {
+      if (arg.m_is_used) {
+        if (used) {
+          throw std::runtime_error("Got mutually exclusive argument error: Both '" + used.value().get().m_names.back() + "' and '" + (arg.m_metavar.empty() ? arg.m_names.back() : arg.m_metavar) + "' specified.");
+        }
+        used = arg;
+      }
+    }
+    if (m_required && !used) {
+      throw std::runtime_error("Missing option from required mutually exclusive group '" + get_inline_usage() + "'");
+    }
+    return true;
+  }
+
+  template <typename... Targs> Argument &add_argument(Targs... f_args);
+
+
+private:
+  ArgumentParser &m_parser;
+  std::list<std::reference_wrapper<Argument>> m_arguments;
+  bool m_has_positional = false;
+  bool m_required;
+};
+
 
 class ArgumentParser {
 public:
@@ -1039,6 +1239,10 @@ public:
     for ([[maybe_unused]] const auto& [unused, argument] : m_argument_map) {
       argument->validate();
     }
+    // Check that all the groups are correctly exclusive
+    for (const auto &group : m_exclusive_groups) {
+      group.validate();
+    }
   }
 
   /* Main entry point for parsing command-line arguments using this
@@ -1112,13 +1316,10 @@ public:
   friend auto operator<<(std::ostream &stream, const ArgumentParser &parser)
       -> std::ostream & {
     stream.setf(std::ios_base::left);
-    stream << "Usage: " << parser.m_program_name << " [options] ";
+
     std::size_t longest_arg_length = parser.get_length_of_longest_argument();
 
-    for (const auto &argument : parser.m_positional_arguments) {
-      stream << argument.m_names.front() << " ";
-    }
-    stream << "\n\n";
+    stream << parser.usage() << "\n\n";
 
     if (!parser.m_description.empty()) {
       stream << parser.m_description << "\n\n";
@@ -1158,6 +1359,72 @@ public:
     return out;
   }
 
+  // Format usage part of help only
+  auto usage() const -> std::string {
+    std::stringstream stream;
+
+    stream << "Usage: " << this->m_program_name;
+
+    // Geometry for managing wrapping
+    std::size_t screen_width = details::get_screen_width();
+    std::size_t program_indent = 7 + this->m_program_name.size();
+    std::size_t width = program_indent;
+
+    // Add any options inline here
+    for (const auto &argument : this->m_optional_arguments) {
+      std::string term;
+      if (argument.m_in_group) {
+        continue;
+      } else if (argument.m_names[0] == "-h") {
+        term = " [-h]";
+      } else {
+        term = " " + argument.get_inline_usage();
+      }
+      if (width + term.size() > screen_width) {
+        stream << "\n" << std::string(program_indent, ' ');
+        // stream << ;
+        // for (int i = 0; i < program_indent; ++i) stream << " ";
+        width = program_indent;
+      }
+      stream << term;
+      width += term.size();
+    }
+    // Put positional arguments after the optionals
+    for (const auto &argument : this->m_positional_arguments) {
+      std::string term;
+      if (argument.m_in_group) {
+        continue;
+      } else if (!argument.m_metavar.empty()) {
+        term = " " + argument.m_metavar;
+      } else {
+        term = " " + argument.m_names.front();
+      }
+      if (width + term.size() > screen_width) {
+        stream << "\n" << std::string(program_indent, ' ');
+        width = program_indent;
+      }
+      stream << term;
+      width+= term.size();
+    }
+
+    // Finally, treat any mutually exclusive groups
+    for (const auto &group : this->m_exclusive_groups) {
+      std::string term = " " + group.get_inline_usage();
+      if (width + term.size() > screen_width) {
+        stream << "\n" << std::string(program_indent, ' ');
+        width = program_indent;
+      }
+      stream << term;
+      width+= term.size();
+    }
+    return stream.str();
+  }
+
+  auto add_mutually_exclusive_group(bool required = false) -> ArgumentParserMutuallyExclusiveGroup & {
+    auto &group = m_exclusive_groups.emplace_back(*this, required);
+    return group;
+  }
+
   // Printing the one and only help message
   // I've stuck with a simple message format, nothing fancy.
   [[deprecated("Use cout << program; instead.  See also help().")]] std::string
@@ -1171,7 +1438,32 @@ private:
   /*
    * @throws std::runtime_error in case of any invalid argument
    */
-  void parse_args_internal(const std::vector<std::string> &arguments) {
+  void parse_args_internal(const std::vector<std::string> &raw_arguments) {
+    // Pre-process this argument list. Anything starting with "--", that
+    // contains an =, where the prefix before the = has an entry in the
+    // options table, should be split.
+    std::vector<std::string> arguments;
+    for (const auto &arg : raw_arguments) {
+      // Check that:
+      // - We don't have an argument named exactly this
+      // - The argument starts with "--"
+      // - The argument contains a "="
+      std::size_t eqpos = arg.find("=");
+      if (m_argument_map.find(arg) == m_argument_map.end() &&
+          arg.rfind("--", 0) == 0 && eqpos != std::string::npos) {
+        // Get the name of the potential option, and check it exists
+        std::string opt_name = arg.substr(0, eqpos);
+        if (m_argument_map.find(opt_name) != m_argument_map.end()) {
+          // This is the name of an option! Split it into two parts
+          arguments.push_back(std::move(opt_name));
+          arguments.push_back(arg.substr(eqpos + 1));
+          continue;
+        }
+      }
+      // If we've fallen through to here, then it's a standard argument
+      arguments.push_back(arg);
+    }
+
     if (m_program_name.empty() && !arguments.empty()) {
       m_program_name = arguments.front();
     }
@@ -1241,7 +1533,27 @@ private:
   bool m_is_parsed = false;
   std::list<Argument> m_positional_arguments;
   std::list<Argument> m_optional_arguments;
+  std::list<ArgumentParserMutuallyExclusiveGroup> m_exclusive_groups;
   std::map<std::string_view, list_iterator, std::less<>> m_argument_map;
 };
+
+// Parameter packing
+// Call add_argument with variadic number of string arguments
+template <typename... Targs> Argument &ArgumentParserMutuallyExclusiveGroup::add_argument(Targs... f_args) {
+  using array_of_sv = std::array<std::string_view, sizeof...(Targs)>;
+  // auto argument = m_parser.add_argument(f_args...);
+  // argument.m_in_group = true;
+  auto argument_test = Argument{array_of_sv{f_args...}};
+  if (!argument_test.m_is_optional) {
+    if (m_has_positional) {
+      throw std::logic_error("Only one positional allowed per mutually exclusive group");
+    }
+    m_has_positional = true;
+  }
+  auto &argument = m_parser.add_argument<Targs...>(f_args...);
+  argument.m_in_group = true;
+  m_arguments.push_back(argument);
+  return argument;
+}
 
 } // namespace argparse
