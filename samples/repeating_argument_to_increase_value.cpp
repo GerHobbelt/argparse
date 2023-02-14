@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_repeat_Argument_to_increase_value_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
 
   int verbosity = 0;
@@ -16,4 +21,6 @@ int main(int argc, char *argv[]) {
   program.parse_args(argc, argv); // Example: ./main -VVVV
 
   std::cout << "verbose level: " << verbosity << std::endl; // verbose level: 4
+
+  return 0;
 }

@@ -3,7 +3,12 @@
 #include <argparse/argparse.hpp>
 #include <cassert>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_custom_assignment_arguments_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
   program.set_prefix_chars("-+/");
   program.set_assign_chars("=:");
@@ -16,7 +21,7 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   if (program.is_used("--foo")) {
@@ -26,4 +31,6 @@ int main(int argc, char *argv[]) {
   if (program.is_used("/B")) {
     std::cout << "/B    : " << program.get("/B") << "\n";
   }
+
+  return 0;
 }

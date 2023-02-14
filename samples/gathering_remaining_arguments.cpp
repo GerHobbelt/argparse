@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_gathering_remaining_arguments_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("compiler");
 
   program.add_argument("files").remaining();
@@ -12,7 +17,7 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   try {
@@ -23,4 +28,6 @@ int main(int argc, char *argv[]) {
   } catch (std::logic_error &e) {
     std::cout << "No files provided" << std::endl;
   }
+
+  return 0;
 }

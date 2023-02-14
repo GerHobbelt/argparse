@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_negative_numbers_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
 
   program.add_argument("integer").help("Input number").scan<'i', int>();
@@ -17,7 +22,7 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   if (program.is_used("integer")) {
@@ -31,4 +36,6 @@ int main(int argc, char *argv[]) {
     }
     std::cout << std::endl;
   }
+
+  return 0;
 }

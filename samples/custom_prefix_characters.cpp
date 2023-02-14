@@ -3,7 +3,12 @@
 #include <argparse/argparse.hpp>
 #include <cassert>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_custom_prefix_characters_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
   program.set_prefix_chars("-+/");
 
@@ -16,7 +21,8 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    //std::exit(1);
+	return 1;
   }
 
   if (program.is_used("+f")) {
@@ -30,4 +36,6 @@ int main(int argc, char *argv[]) {
   if (program.is_used("/foo")) {
     std::cout << "/foo  : " << program.get("/foo") << "\n";
   }
+
+  return 0;
 }

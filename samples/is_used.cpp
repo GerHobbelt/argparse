@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_is_used_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
 
   program.add_argument("--color")
@@ -16,7 +21,7 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   auto color = program.get<std::string>("--color"); // "orange"
@@ -25,4 +30,6 @@ int main(int argc, char *argv[]) {
   std::cout << "Color: " << color << "\n";
   std::cout << "Argument was explicitly provided by user? " << std::boolalpha
             << explicit_color << "\n";
+
+  return 0;
 }

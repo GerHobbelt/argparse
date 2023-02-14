@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_optional_flag_arguments_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
 
   program.add_argument("--verbose")
@@ -15,10 +20,12 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   if (program["--verbose"] == true) {
     std::cout << "Verbosity enabled" << std::endl;
   }
+
+  return 0;
 }

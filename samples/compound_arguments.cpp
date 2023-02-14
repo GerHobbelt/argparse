@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_compound_arguments_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
 
   program.add_argument("-a").default_value(false).implicit_value(true);
@@ -19,7 +24,7 @@ int main(int argc, char *argv[]) {
   } catch (const std::runtime_error &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
-    std::exit(1);
+    return 1;
   }
 
   auto a = program.get<bool>("-a");               // true
@@ -35,4 +40,6 @@ int main(int argc, char *argv[]) {
     }
     std::cout << std::endl;
   }
+
+  return 0;
 }

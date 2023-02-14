@@ -3,7 +3,12 @@
 #include <argparse/argparse.hpp>
 #include <cassert>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_parse_known_arguments_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("test");
   program.add_argument("--foo").implicit_value(true).default_value(false);
   program.add_argument("bar");
@@ -25,4 +30,6 @@ int main(int argc, char *argv[]) {
     }
     std::cout << std::endl;
   }
+
+  return 0;
 }

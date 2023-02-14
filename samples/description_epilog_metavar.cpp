@@ -2,7 +2,12 @@
 
 #include <argparse/argparse.hpp>
 
-int main(int argc, char *argv[]) {
+
+#if defined(BUILD_MONOLITHIC)
+#define main    argparse_description_epilog_metavar_main
+#endif
+
+int main(int argc, const char **argv) {
   argparse::ArgumentParser program("main");
   program.add_argument("thing").help("Thing to use.").metavar("THING");
   program.add_argument("--member")
@@ -16,4 +21,6 @@ int main(int argc, char *argv[]) {
   program.parse_args(argc, argv);
 
   std::cout << program << std::endl;
+
+  return 0;
 }
