@@ -29,6 +29,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 #pragma once
+
+#ifndef ARGPARSE_MODULE_USE_STD_MODULE
 #include <algorithm>
 #include <any>
 #include <array>
@@ -53,6 +55,7 @@ SOFTWARE.
 #include <utility>
 #include <variant>
 #include <vector>
+#endif
 
 namespace argparse {
 
@@ -72,7 +75,7 @@ struct HasContainerTraits<
                    decltype(std::declval<T>().size())>> : std::true_type {};
 
 template <typename T>
-static constexpr bool IsContainer = HasContainerTraits<T>::value;
+inline constexpr bool IsContainer = HasContainerTraits<T>::value;
 
 template <typename T, typename = void>
 struct HasStreamableTraits : std::false_type {};
@@ -84,7 +87,7 @@ struct HasStreamableTraits<
     : std::true_type {};
 
 template <typename T>
-static constexpr bool IsStreamable = HasStreamableTraits<T>::value;
+inline constexpr bool IsStreamable = HasStreamableTraits<T>::value;
 
 constexpr std::size_t repr_max_container_size = 5;
 
@@ -673,7 +676,36 @@ public:
         name_stream << " " << argument.m_metavar;
       }
     }
-    stream << name_stream.str() << "\t" << argument.m_help;
+
+    // align multiline help message
+    auto stream_width = stream.width();
+    auto name_padding = std::string(name_stream.str().size(), ' ');
+    auto pos = std::string::size_type{};
+    auto prev = std::string::size_type{};
+    auto first_line = true;
+    auto hspace = "  "; // minimal space between name and help message
+    stream << name_stream.str();
+    std::string_view help_view(argument.m_help);
+    while ((pos = argument.m_help.find('\n', prev)) != std::string::npos) {
+      auto line = help_view.substr(prev, pos - prev + 1);
+      if (first_line) {
+        stream << hspace << line;
+        first_line = false;
+      } else {
+        stream.width(stream_width);
+        stream << name_padding << hspace << line;
+      }
+      prev += pos - prev + 1;
+    }
+    if (first_line) {
+      stream << hspace << argument.m_help;
+    } else {
+      auto leftover = help_view.substr(prev, argument.m_help.size() - prev);
+      if (!leftover.empty()) {
+        stream.width(stream_width);
+        stream << name_padding << hspace << leftover;
+      }
+    }
 
     // print nargs spec
     if (!argument.m_help.empty()) {
@@ -1052,14 +1084,18 @@ class ArgumentParser {
 public:
   explicit ArgumentParser(std::string program_name = {},
                           std::string version = "1.0",
-                          default_arguments add_args = default_arguments::all)
+                          default_arguments add_args = default_arguments::all,
+                          bool exit_on_default_arguments = true)
       : m_program_name(std::move(program_name)), m_version(std::move(version)),
+        m_exit_on_default_arguments(exit_on_default_arguments),
         m_parser_path(m_program_name) {
     if ((add_args & default_arguments::help) == default_arguments::help) {
       add_argument("-h", "--help")
           .action([&](const auto & /*unused*/) {
             std::cout << help().str();
-            std::exit(0);
+            if (m_exit_on_default_arguments) {
+              std::exit(0);
+            }
           })
           .default_value(false)
           .help("shows help message and exits")
@@ -1070,7 +1106,9 @@ public:
       add_argument("-v", "--version")
           .action([&](const auto & /*unused*/) {
             std::cout << m_version << std::endl;
-            std::exit(0);
+            if (m_exit_on_default_arguments) {
+              std::exit(0);
+            }
           })
           .default_value(false)
           .help("prints version information and exits")
@@ -1289,7 +1327,7 @@ public:
   }
 
   /* Indexing operator. Return a reference to an Argument object
-   * Used in conjuction with Argument.operator== e.g., parser["foo"] == true
+   * Used in conjunction with Argument.operator== e.g., parser["foo"] == true
    * @throws std::logic_error in case of an invalid argument name
    */
   Argument &operator[](std::string_view arg_name) const {
@@ -1676,6 +1714,7 @@ private:
   std::string m_version;
   std::string m_description;
   std::string m_epilog;
+  bool m_exit_on_default_arguments = true;
   std::string m_prefix_chars{"-"};
   std::string m_assign_chars{"="};
   bool m_is_parsed = false;
