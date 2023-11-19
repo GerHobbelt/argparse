@@ -148,6 +148,7 @@ constexpr bool standard_unsigned_integer<unsigned long long int> = true;
 
 } // namespace
 
+constexpr int radix_2 = 2;
 constexpr int radix_8 = 8;
 constexpr int radix_10 = 10;
 constexpr int radix_16 = 16;
@@ -183,11 +184,27 @@ constexpr bool starts_with(std::basic_string_view<CharT, Traits> prefix,
 }
 
 enum class chars_format {
-  scientific = 0x1,
-  fixed = 0x2,
-  hex = 0x4,
+  scientific = 0xf1,
+  fixed = 0xf2,
+  hex = 0xf4,
+  binary = 0xf8,
   general = fixed | scientific
 };
+
+struct ConsumeBinaryPrefixResult {
+  bool is_binary;
+  std::string_view rest;
+};
+
+constexpr auto consume_binary_prefix(std::string_view s)
+    -> ConsumeBinaryPrefixResult {
+  if (starts_with(std::string_view{"0b"}, s) ||
+      starts_with(std::string_view{"0B"}, s)) {
+    s.remove_prefix(2);
+    return {true, s};
+  }
+  return {false, s};
+}
 
 struct ConsumeHexPrefixResult {
   bool is_hexadecimal;
@@ -229,6 +246,15 @@ inline auto do_from_chars(std::string_view s) -> T {
 template <class T, auto Param = 0> struct parse_number {
   auto operator()(std::string_view s) -> T {
     return do_from_chars<T, Param>(s);
+  }
+};
+
+template <class T> struct parse_number<T, radix_2> {
+  auto operator()(std::string_view s) -> T {
+    if (auto [ok, rest] = consume_binary_prefix(s); ok) {
+      return do_from_chars<T, radix_2>(rest);
+    }
+    throw std::invalid_argument{"pattern not found"};
   }
 };
 
@@ -277,6 +303,19 @@ template <class T> struct parse_number<T> {
       } catch (const std::range_error &err) {
         throw std::range_error("Failed to parse '" + std::string(s) +
                                "' as hexadecimal: " + err.what());
+      }
+    }
+
+    auto [ok_binary, rest_binary] = consume_binary_prefix(s);
+    if (ok_binary) {
+      try {
+        return do_from_chars<T, radix_2>(rest_binary);
+      } catch (const std::invalid_argument &err) {
+        throw std::invalid_argument("Failed to parse '" + std::string(s) +
+                                    "' as binary: " + err.what());
+      } catch (const std::range_error &err) {
+        throw std::range_error("Failed to parse '" + std::string(s) +
+                               "' as binary: " + err.what());
       }
     }
 
@@ -342,6 +381,10 @@ template <class T> struct parse_number<T, chars_format::general> {
       throw std::invalid_argument{
           "chars_format::general does not parse hexfloat"};
     }
+    if (auto r = consume_binary_prefix(s); r.is_binary) {
+      throw std::invalid_argument{
+          "chars_format::general does not parse binfloat"};
+    }
 
     try {
       return do_strtod<T>(s);
@@ -360,6 +403,9 @@ template <class T> struct parse_number<T, chars_format::hex> {
     if (auto r = consume_hex_prefix(s); !r.is_hexadecimal) {
       throw std::invalid_argument{"chars_format::hex parses hexfloat"};
     }
+    if (auto r = consume_binary_prefix(s); r.is_binary) {
+      throw std::invalid_argument{"chars_format::hex does not parse binfloat"};
+    }
 
     try {
       return do_strtod<T>(s);
@@ -373,11 +419,29 @@ template <class T> struct parse_number<T, chars_format::hex> {
   }
 };
 
+template <class T> struct parse_number<T, chars_format::binary> {
+  auto operator()(std::string const &s) -> T {
+    if (auto r = consume_hex_prefix(s); r.is_hexadecimal) {
+      throw std::invalid_argument{
+          "chars_format::binary does not parse hexfloat"};
+    }
+    if (auto r = consume_binary_prefix(s); !r.is_binary) {
+      throw std::invalid_argument{"chars_format::binary parses binfloat"};
+    }
+
+    return do_strtod<T>(s);
+  }
+};
+
 template <class T> struct parse_number<T, chars_format::scientific> {
   auto operator()(std::string const &s) -> T {
     if (auto r = consume_hex_prefix(s); r.is_hexadecimal) {
       throw std::invalid_argument{
           "chars_format::scientific does not parse hexfloat"};
+    }
+    if (auto r = consume_binary_prefix(s); r.is_binary) {
+      throw std::invalid_argument{
+          "chars_format::scientific does not parse binfloat"};
     }
     if (s.find_first_of("eE") == std::string::npos) {
       throw std::invalid_argument{
@@ -401,6 +465,10 @@ template <class T> struct parse_number<T, chars_format::fixed> {
     if (auto r = consume_hex_prefix(s); r.is_hexadecimal) {
       throw std::invalid_argument{
           "chars_format::fixed does not parse hexfloat"};
+    }
+    if (auto r = consume_binary_prefix(s); r.is_binary) {
+      throw std::invalid_argument{
+          "chars_format::fixed does not parse binfloat"};
     }
     if (s.find_first_of("eE") != std::string::npos) {
       throw std::invalid_argument{
@@ -629,6 +697,9 @@ public:
     } else if constexpr (is_one_of(Shape, 'u') &&
                          details::standard_unsigned_integer<T>) {
       action(details::parse_number<T, details::radix_10>());
+    } else if constexpr (is_one_of(Shape, 'b') &&
+                         details::standard_unsigned_integer<T>) {
+      action(details::parse_number<T, details::radix_2>());
     } else if constexpr (is_one_of(Shape, 'o') &&
                          details::standard_unsigned_integer<T>) {
       action(details::parse_number<T, details::radix_8>());
@@ -1395,52 +1466,18 @@ public:
     }
   }
 
-  ArgumentParser(ArgumentParser &&) noexcept = default;
-  ArgumentParser &operator=(ArgumentParser &&) = default;
-
-  ArgumentParser(const ArgumentParser &other)
-      : m_program_name(other.m_program_name), m_version(other.m_version),
-        m_description(other.m_description), m_epilog(other.m_epilog),
-        m_prefix_chars(other.m_prefix_chars),
-        m_assign_chars(other.m_assign_chars), m_is_parsed(other.m_is_parsed),
-        m_positional_arguments(other.m_positional_arguments),
-        m_optional_arguments(other.m_optional_arguments),
-        m_parser_path(other.m_parser_path), m_subparsers(other.m_subparsers) {
-    for (auto it = std::begin(m_positional_arguments);
-         it != std::end(m_positional_arguments); ++it) {
-      index_argument(it);
-    }
-    for (auto it = std::begin(m_optional_arguments);
-         it != std::end(m_optional_arguments); ++it) {
-      index_argument(it);
-    }
-    for (auto it = std::begin(m_subparsers); it != std::end(m_subparsers);
-         ++it) {
-      m_subparser_map.insert_or_assign(it->get().m_program_name, it);
-      m_subparser_used.insert_or_assign(it->get().m_program_name, false);
-    }
-
-    for (const auto &g : other.m_mutually_exclusive_groups) {
-      MutuallyExclusiveGroup group(*this, g.m_required);
-      for (const auto &arg : g.m_elements) {
-        // Find argument in argument map and add reference to it
-        // in new group
-        // argument_it = other.m_argument_map.find("name")
-        auto first_name = arg->m_names[0];
-        auto it = m_argument_map.find(first_name);
-        group.m_elements.push_back(&(*it->second));
-      }
-      m_mutually_exclusive_groups.push_back(std::move(group));
-    }
-  }
-
   ~ArgumentParser() = default;
 
-  ArgumentParser &operator=(const ArgumentParser &other) {
-    auto tmp = other;
-    std::swap(*this, tmp);
-    return *this;
-  }
+  // ArgumentParser is meant to be used in a single function.
+  // Setup everything and parse arguments in one place.
+  //
+  // ArgumentParser internally uses std::string_views,
+  // references, iterators, etc.
+  // Many of these elements become invalidated after a copy or move.
+  ArgumentParser(const ArgumentParser &other) = delete;
+  ArgumentParser &operator=(const ArgumentParser &other) = delete;
+  ArgumentParser(ArgumentParser &&) noexcept = delete;
+  ArgumentParser &operator=(ArgumentParser &&) = delete;
 
   explicit operator bool() const {
     auto arg_used = std::any_of(m_argument_map.cbegin(), m_argument_map.cend(),
@@ -1747,12 +1784,20 @@ public:
       stream << argument;
     }
 
-    if (!parser.m_subparser_map.empty()) {
+    bool has_visible_subcommands = std::any_of(
+        parser.m_subparser_map.begin(), parser.m_subparser_map.end(),
+        [](auto &p) { return !p.second->get().m_suppress; });
+
+    if (has_visible_subcommands) {
       stream << (parser.m_positional_arguments.empty()
                      ? (parser.m_optional_arguments.empty() ? "" : "\n")
                      : "\n")
              << "Subcommands:\n";
       for (const auto &[command, subparser] : parser.m_subparser_map) {
+        if (subparser->get().m_suppress) {
+          continue;
+        }
+
         stream << std::setw(2) << " ";
         stream << std::setw(static_cast<int>(longest_arg_length - 2))
                << command;
@@ -1797,7 +1842,11 @@ public:
     if (!m_subparser_map.empty()) {
       stream << " {";
       std::size_t i{0};
-      for (const auto &[command, unused] : m_subparser_map) {
+      for (const auto &[command, subparser] : m_subparser_map) {
+        if (subparser->get().m_suppress) {
+          continue;
+        }
+
         if (i == 0) {
           stream << command;
         } else {
@@ -1826,6 +1875,8 @@ public:
     m_subparser_map.insert_or_assign(parser.m_program_name, it);
     m_subparser_used.insert_or_assign(parser.m_program_name, false);
   }
+
+  void set_suppress(bool suppress) { m_suppress = suppress; }
 
 private:
   bool is_valid_prefix_char(char c) const {
@@ -2120,6 +2171,7 @@ private:
   std::map<std::string_view, argument_parser_it> m_subparser_map;
   std::map<std::string_view, bool> m_subparser_used;
   std::vector<MutuallyExclusiveGroup> m_mutually_exclusive_groups;
+  bool m_suppress = false;
 };
 
 } // namespace argparse

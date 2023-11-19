@@ -6,7 +6,7 @@
   <a href="https://github.com/p-ranav/argparse/blob/master/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="license"/>
   </a>
-  <img src="https://img.shields.io/badge/version-2.9-blue.svg?cacheSeconds=2592000" alt="version"/>
+  <img src="https://img.shields.io/badge/version-3.0-blue.svg?cacheSeconds=2592000" alt="version"/>
 </p>
 
 ## Highlights
@@ -46,6 +46,8 @@
      *    [Positional Arguments with Compound Toggle Arguments](#positional-arguments-with-compound-toggle-arguments)
      *    [Restricting the set of values for an argument](#restricting-the-set-of-values-for-an-argument)
      *    [Using `option=value` syntax](#using-optionvalue-syntax)
+*    [Developer Notes](#developer-notes)
+     *    [Copying and Moving](#copying-and-moving)
 *    [CMake Integration](#cmake-integration)
 *    [Building, Installing, and Testing](#building-installing-and-testing)
 *    [Supported Toolchains](#supported-toolchains)
@@ -446,7 +448,7 @@ Optional arguments:
   -h, --help    	shows help message and exits
   -v, --version 	prints version information and exits
   --member ALIAS	The alias for the member to pass to.
-  --verbose     	
+  --verbose
 
 Possible things include betingalw, chiz, and res.
 ```
@@ -609,7 +611,7 @@ The grammar follows `std::from_chars`, but does not exactly duplicate it. For ex
 | 'g' or 'G' | general form (either fixed or scientific) |
 |            |                                           |
 | 'd'        | decimal                                   |
-| 'i'        | `std::from_chars` grammar with base == 0  |
+| 'i'        | `std::from_chars` grammar with base == 10 |
 | 'o'        | octal (unsigned)                          |
 | 'u'        | decimal (unsigned)                        |
 | 'x' or 'X' | hexadecimal (unsigned)                    |
@@ -899,6 +901,39 @@ When a help message is requested from a subparser, only the help for that partic
 
 Additionally, every parser has the `.is_subcommand_used("<command_name>")` and `.is_subcommand_used(subparser)` member functions to check if a subcommand was used. 
 
+Sometimes there may be a need to hide part of the subcommands from the user
+by suppressing information about them in an help message. To do this,
+```ArgumentParser``` contains the method ```.set_suppress(bool suppress)```:
+
+```cpp
+argparse::ArgumentParser program("test");
+
+argparse::ArgumentParser hidden_cmd("hidden");
+hidden_cmd.add_argument("files").remaining();
+hidden_cmd.set_suppress(true);
+
+program.add_subparser(hidden_cmd);
+```
+
+```console
+foo@bar:/home/dev/$ ./main -h
+Usage: test [--help] [--version] {}
+
+Optional arguments:
+  -h, --help    shows help message and exits
+  -v, --version prints version information and exits
+
+foo@bar:/home/dev/$ ./main hidden -h
+Usage: hidden [--help] [--version] files
+
+Positional arguments:
+  files         [nargs: 0 or more]
+
+Optional arguments:
+  -h, --help    shows help message and exits
+  -v, --version prints version information and exits
+```
+
 ### Getting Argument and Subparser Instances
 
 ```Argument``` and ```ArgumentParser``` instances added to an ```ArgumentParser``` can be retrieved with ```.at<T>()```. The default return type is ```Argument```.
@@ -1165,7 +1200,7 @@ foo@bar:/home/dev/$ ./main 6
 Invalid argument "6" - allowed options: {0, 1, 2, 3, 4, 5}
 ```
 
-## Using `option=value` syntax
+### Using `option=value` syntax
 
 ```cpp
 #include "argparse.hpp"
@@ -1200,6 +1235,12 @@ foo@bar:/home/dev/$ ./test --bar=BAR --foo
 --foo: true
 --bar: BAR
 ```
+
+## Developer Notes
+
+### Copying and Moving
+
+`argparse::ArgumentParser` is intended to be used in a single function - setup everything and parse arguments in one place. Attempting to move or copy invalidates internal references (issue #260). Thus, starting with v3.0, `argparse::ArgumentParser` copy and move constructors are marked as `delete`.
 
 ## CMake Integration 
 
