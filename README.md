@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
   try {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;
@@ -137,7 +137,7 @@ program.add_argument("--verbose")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -157,6 +157,31 @@ Here's what's happening:
 * The program is written so as to display something when --verbose is specified and display nothing when not.
 * Since the argument is actually optional, no error is thrown when running the program without ```--verbose```. Note that by using ```.default_value(false)```, if the optional argument isn’t used, it's value is automatically set to false.
 * By using ```.implicit_value(true)```, the user specifies that this option is more of a flag than something that requires a value. When the user provides the --verbose option, it's value is set to true.
+
+#### Flag
+
+When defining flag arguments, you can use the shorthand `flag()` which is the same as `default_value(false).implicit_value(true)`. 
+
+```cpp
+argparse::ArgumentParser program("test");
+
+program.add_argument("--verbose")
+  .help("increase output verbosity")
+  .flag();
+
+try {
+  program.parse_args(argc, argv);
+}
+catch (const std::exception& err) {
+  std::cerr << err.what() << std::endl;
+  std::cerr << program;
+  std::exit(1);
+}
+
+if (program["--verbose"] == true) {
+  std::cout << "Verbosity enabled" << std::endl;
+}
+```
 
 #### Requiring optional arguments
 
@@ -203,7 +228,7 @@ program.add_argument("--color")
 try {
   program.parse_args(argc, argv);    // Example: ./main --color orange
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -226,7 +251,7 @@ program.add_argument("--color")
 try {
   program.parse_args(argc, argv);    // Example: ./main --color red --color green --color blue
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -274,7 +299,7 @@ program.add_argument("floats")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -307,7 +332,7 @@ program.add_argument("--verbose")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -407,7 +432,7 @@ program.add_argument("--input_files")
 try {
   program.parse_args(argc, argv);   // Example: ./main --input_files config.yml System.xml
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -436,7 +461,7 @@ program.add_argument("--query_point")
 try {
   program.parse_args(argc, argv); // Example: ./main --query_point 3.5 4.7 9.2
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -491,7 +516,7 @@ program.add_argument("-c")
 try {
   program.parse_args(argc, argv);                  // Example: ./main -abc 1.95 2.47
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -604,7 +629,7 @@ program.add_argument("files")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -651,7 +676,7 @@ program.add_argument("files")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -777,7 +802,7 @@ int main(int argc, char *argv[]) {
   try {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;
@@ -904,7 +929,7 @@ int main(int argc, char *argv[]) {
   try {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;
@@ -952,7 +977,7 @@ int main(int argc, char *argv[]) {
   try {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;
@@ -993,7 +1018,7 @@ program.add_argument("config")
 try {
   program.parse_args({"./test", "config.json"});
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -1029,7 +1054,7 @@ program.add_argument("--files")
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -1060,18 +1085,12 @@ argparse::ArgumentParser program("test");
 
 program.add_argument("input")
   .default_value(std::string{"baz"})
-  .action([](const std::string& value) {
-    static const std::vector<std::string> choices = { "foo", "bar", "baz" };
-    if (std::find(choices.begin(), choices.end(), value) != choices.end()) {
-      return value;
-    }
-    return std::string{ "baz" };
-  });
+  .choices("foo", "bar", "baz");
 
 try {
   program.parse_args(argc, argv);
 }
-catch (const std::runtime_error& err) {
+catch (const std::exception& err) {
   std::cerr << err.what() << std::endl;
   std::cerr << program;
   std::exit(1);
@@ -1083,7 +1102,34 @@ std::cout << input << std::endl;
 
 ```console
 foo@bar:/home/dev/$ ./main fex
-baz
+Invalid argument "fex" - allowed options: {foo, bar, baz}
+```
+
+Using choices also works with integer types, e.g.,
+
+```cpp
+argparse::ArgumentParser program("test");
+
+program.add_argument("input")
+  .default_value(0)
+  .choices(0, 1, 2, 3, 4, 5);
+
+try {
+  program.parse_args(argc, argv);
+}
+catch (const std::exception& err) {
+  std::cerr << err.what() << std::endl;
+  std::cerr << program;
+  std::exit(1);
+}
+
+auto input = program.get("input");
+std::cout << input << std::endl;
+```
+
+```console
+foo@bar:/home/dev/$ ./main 6
+Invalid argument "6" - allowed options: {0, 1, 2, 3, 4, 5}
 ```
 
 ## Using `option=value` syntax
@@ -1100,7 +1146,7 @@ int main(int argc, char *argv[]) {
   try {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::exception& err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;

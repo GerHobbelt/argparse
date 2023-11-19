@@ -14,11 +14,11 @@ int main(int argc, const char **argv) {
       .help("display the square of a given number")
       .scan<'i', int>();
 
-  program.add_argument("--verbose").default_value(false).implicit_value(true);
+  program.add_argument("--verbose").flag();
 
   try {
     program.parse_args(argc, argv);
-  } catch (const std::runtime_error &err) {
+  } catch (const std::exception &err) {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     return 1;
