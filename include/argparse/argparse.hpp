@@ -58,6 +58,18 @@ SOFTWARE.
 #include <vector>
 #endif
 
+#ifndef ARGPARSE_CUSTOM_STRTOF
+#define ARGPARSE_CUSTOM_STRTOF strtof
+#endif
+
+#ifndef ARGPARSE_CUSTOM_STRTOD
+#define ARGPARSE_CUSTOM_STRTOD strtod
+#endif
+
+#ifndef ARGPARSE_CUSTOM_STRTOLD
+#define ARGPARSE_CUSTOM_STRTOLD strtold
+#endif
+
 namespace argparse {
 
 namespace details { // namespace for helper methods
@@ -347,9 +359,10 @@ template <class T> struct parse_number<T> {
 namespace {
 
 template <class T> inline const auto generic_strtod = nullptr;
-template <> inline const auto generic_strtod<float> = strtof;
-template <> inline const auto generic_strtod<double> = strtod;
-template <> inline const auto generic_strtod<long double> = strtold;
+template <> inline const auto generic_strtod<float> = ARGPARSE_CUSTOM_STRTOF;
+template <> inline const auto generic_strtod<double> = ARGPARSE_CUSTOM_STRTOD;
+template <>
+inline const auto generic_strtod<long double> = ARGPARSE_CUSTOM_STRTOLD;
 
 } // namespace
 
@@ -676,6 +689,57 @@ public:
     return *this;
   }
 
+  auto &store_into(bool &var) {
+    flag();
+    if (m_default_value.has_value()) {
+      var = std::any_cast<bool>(m_default_value);
+    }
+    action([&var](const auto & /*unused*/) { var = true; });
+    return *this;
+  }
+
+  auto &store_into(int &var) {
+    if (m_default_value.has_value()) {
+      var = std::any_cast<int>(m_default_value);
+    }
+    action([&var](const auto &s) {
+      var = details::parse_number<int, details::radix_10>()(s);
+    });
+    return *this;
+  }
+
+  auto &store_into(double &var) {
+    if (m_default_value.has_value()) {
+      var = std::any_cast<double>(m_default_value);
+    }
+    action([&var](const auto &s) {
+      var = details::parse_number<double, details::chars_format::general>()(s);
+    });
+    return *this;
+  }
+
+  auto &store_into(std::string &var) {
+    if (m_default_value.has_value()) {
+      var = std::any_cast<std::string>(m_default_value);
+    }
+    action([&var](const std::string &s) { var = s; });
+    return *this;
+  }
+
+  auto &store_into(std::vector<std::string> &var) {
+    if (m_default_value.has_value()) {
+      var = std::any_cast<std::vector<std::string>>(m_default_value);
+    }
+    action([this, &var](const std::string &s) {
+      if (!m_is_used) {
+        var.clear();
+      }
+      m_is_used = true;
+      var.push_back(s);
+    });
+    return *this;
+  }
+
   auto &append() {
     m_is_repeatable = true;
     return *this;
@@ -839,7 +903,6 @@ public:
     if (!m_is_repeatable && m_is_used) {
       throw std::runtime_error("Duplicate argument");
     }
-    m_is_used = true;
     m_used_name = used_name;
 
     if (m_choices.has_value()) {
@@ -862,6 +925,7 @@ public:
     if (num_args_max == 0) {
       m_values.emplace_back(m_implicit_value);
       std::visit([](const auto &f) { f({}); }, m_action);
+      m_is_used = true;
       return start;
     }
     if ((dist = static_cast<std::size_t>(std::distance(start, end))) >=
@@ -899,9 +963,11 @@ public:
         Argument &self;
       };
       std::visit(ActionApply{start, end, *this}, m_action);
+      m_is_used = true;
       return end;
     }
     if (m_default_value.has_value()) {
+      m_is_used = true;
       return start;
     }
     throw std::runtime_error("Too few arguments for '" +
