@@ -698,12 +698,13 @@ public:
     return *this;
   }
 
-  auto &store_into(int &var) {
+  template <typename T, typename std::enable_if<std::is_integral<T>::value>::type * = nullptr>
+  auto &store_into(T &var) {
     if (m_default_value.has_value()) {
-      var = std::any_cast<int>(m_default_value);
+      var = std::any_cast<T>(m_default_value);
     }
     action([&var](const auto &s) {
-      var = details::parse_number<int, details::radix_10>()(s);
+      var = details::parse_number<T, details::radix_10>()(s);
     });
     return *this;
   }
@@ -2336,6 +2337,22 @@ protected:
           }
         }
         auto argument = positional_argument_it++;
+
+        // Deal with the situation of <positional_arg1>... <positional_arg2>
+        if (argument->m_num_args_range.get_min() == 1 &&
+            argument->m_num_args_range.get_max() == (std::numeric_limits<std::size_t>::max)() &&
+            positional_argument_it != std::end(m_positional_arguments) &&
+            std::next(positional_argument_it) == std::end(m_positional_arguments) &&
+            positional_argument_it->m_num_args_range.get_min() == 1 &&
+            positional_argument_it->m_num_args_range.get_max() == 1 ) {
+          if (std::next(it) != end) {
+            positional_argument_it->consume(std::prev(end), end);
+            end = std::prev(end);
+          } else {
+            throw std::runtime_error("Missing " + positional_argument_it->m_names.front());
+          }
+        }
+
         it = argument->consume(it, end);
         continue;
       }
