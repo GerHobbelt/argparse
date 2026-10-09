@@ -246,6 +246,21 @@ auto color = program.get<std::string>("--color");  // "orange"
 auto explicit_color = program.is_used("--color");  // true, user provided orange
 ```
 
+If you already have a reference to the `Argument` (e.g., saved from `add_argument`), you can call `.is_used()` on it directly, instead of looking it up again by name:
+
+```cpp
+auto &color_arg = program.add_argument("--color")
+  .default_value(std::string{"orange"})
+  .help("specify the cat's fur color");
+
+program.parse_args(argc, argv);
+
+auto explicit_color = color_arg.is_used();  // true, user provided a value
+if (color_arg) {                            // Argument also has an explicit operator bool()
+  // ...
+}
+```
+
 #### Joining values of repeated optional arguments
 
 You may want to allow an optional argument to be repeated and gather all values in one place.
@@ -454,6 +469,15 @@ Optional arguments:
 ```
 
 You may also get the help message in string via `program.help().str()`.
+
+If your compiler and standard library support `std::format`/`std::print` (C++20), `argparse::ArgumentParser` and `argparse::Argument` are also formattable directly, producing the same output as `operator<<`:
+
+```cpp
+std::print("{}", program); // same as std::cout << program
+auto message = std::format("{}", program);
+```
+
+This is detected automatically at compile time; no extra include or opt-in is required beyond `<format>` being available.
 
 #### Adding a description and an epilog to help
 

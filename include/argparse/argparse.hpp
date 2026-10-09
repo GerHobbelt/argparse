@@ -58,6 +58,18 @@ SOFTWARE.
 #include <variant>
 #include <vector>
 #include <filesystem>
+#if defined(__has_include)
+#  if __has_include(<format>)
+#    include <format>
+#  endif
+#endif
+#endif
+
+// std::format support requires C++20 and a standard library that actually
+// defines std::formatter (merely finding the <format> header isn't enough,
+// since e.g. libc++ ships the header even in C++17 mode with no contents).
+#if defined(__cpp_lib_format)
+#  define ARGPARSE_HAS_STD_FORMAT 1
 #endif
 
 #ifndef ARGPARSE_CUSTOM_STRTOF
@@ -575,6 +587,32 @@ std::string get_most_similar_string(const std::map<std::string, ValueType> &map,
 
   return most_similar;
 }
+
+// RAII guard: forces space-fill and left-justification for help/usage
+// rendering, restoring the stream's original flags/fill on scope exit (even
+// if a write throws), so printing doesn't leak into or inherit from the
+// caller's stream state.
+class StreamFormatGuard {
+public:
+  explicit StreamFormatGuard(std::ostream &stream)
+      : m_stream(stream), m_flags(stream.flags()), m_fill(stream.fill()) {
+    m_stream.setf(std::ios_base::left, std::ios_base::adjustfield);
+    m_stream.fill(' ');
+  }
+
+  StreamFormatGuard(const StreamFormatGuard &) = delete;
+  StreamFormatGuard &operator=(const StreamFormatGuard &) = delete;
+
+  ~StreamFormatGuard() {
+    m_stream.flags(m_flags);
+    m_stream.fill(m_fill);
+  }
+
+private:
+  std::ostream &m_stream;
+  std::ios_base::fmtflags m_flags;
+  char m_fill;
+};
 
 } // namespace details
 
@@ -1190,6 +1228,8 @@ public:
 
   friend std::ostream &operator<<(std::ostream &stream,
                                   const Argument &argument) {
+    details::StreamFormatGuard format_guard(stream);
+
     std::stringstream name_stream;
     name_stream << "  "; // indent
     if (argument.is_positional(argument.m_names.front(),
@@ -1290,6 +1330,11 @@ public:
                         });
     }
   }
+
+  // Whether this argument was supplied on the command line.
+  bool is_used() const { return m_is_used; }
+
+  explicit operator bool() const { return is_used(); }
 
   /*
    * positional:
@@ -1954,7 +1999,7 @@ public:
    * user-supplied, even with a default value.
    */
   auto is_used(std::string_view arg_name) const {
-    return (*this)[arg_name].m_is_used;
+    return (*this)[arg_name].is_used();
   }
 
   /* Getter that returns true if a subcommand is used.
@@ -2002,19 +2047,7 @@ public:
   // Print help message
   friend auto operator<<(std::ostream &stream, const ArgumentParser &parser)
       -> std::ostream & {
-    struct StreamFormatGuard {
-      std::ostream &stream;
-      std::ios_base::fmtflags flags;
-      char fill;
-
-      ~StreamFormatGuard() {
-        stream.flags(flags);
-        stream.fill(fill);
-      }
-    } guard{stream, stream.flags(), stream.fill()};
-
-    stream.setf(std::ios_base::left, std::ios_base::adjustfield);
-    stream.fill(' ');
+    details::StreamFormatGuard format_guard(stream);
 
     auto longest_arg_length = parser.get_length_of_longest_argument();
 
@@ -2641,3 +2674,28 @@ protected:
 };
 
 } // namespace argparse
+
+#ifdef ARGPARSE_HAS_STD_FORMAT
+// Formats via the existing operator<<, so std::format/std::print work the
+// same way as writing to an ostream.
+template <>
+struct std::formatter<argparse::Argument> : std::formatter<std::string> {
+  auto format(const argparse::Argument &argument,
+              std::format_context &ctx) const {
+    std::ostringstream stream;
+    stream << argument;
+    return std::formatter<std::string>::format(stream.str(), ctx);
+  }
+};
+
+template <>
+struct std::formatter<argparse::ArgumentParser>
+   : std::formatter<std::string> {
+  auto format(const argparse::ArgumentParser &parser,
+              std::format_context &ctx) const {
+    std::ostringstream stream;
+    stream << parser;
+    return std::formatter<std::string>::format(stream.str(), ctx);
+  }
+};
+#endif
